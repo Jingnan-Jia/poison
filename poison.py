@@ -16,7 +16,9 @@ import copy
 import cv2
 # local python package
 import deep_cnn
+import input_
 import metrics
+import utils
 from PIL import Image
 
 from keras.datasets import cifar10, mnist
@@ -62,7 +64,7 @@ tf.flags.DEFINE_boolean('selected_x', 1, 'whether to select specific x')
 tf.flags.DEFINE_boolean('selected_lb', 1, 'whether to select specific target label')
 tf.flags.DEFINE_boolean('nns', 1, 'whether to choose near neighbors as changed data')
 
-tf.flags.DEFINE_float('epsilon', 500.0, 'water_print_power')
+tf.flags.DEFINE_float('epsilon', 100.0, 'water_print_power')
 
 tf.flags.DEFINE_float('water_power', args.power, 'water_print_power')
 tf.flags.DEFINE_float('cgd_ratio', args.ratio, 'changed_dataset_ratio')
@@ -92,22 +94,6 @@ tf.flags.DEFINE_integer('block_flag', args.block_flag, 'block_flag')
 FLAGS = tf.flags.FLAGS
 tran =0
 
-def create_dir_if_needed(dest_directory):
-  """
-  Create directory if doesn't exist
-  :param dest_directory:
-  :return: True if everything went well
-  """
-  #create dir
-  if not tf.gfile.IsDirectory(dest_directory):
-    tf.gfile.MakeDirs(dest_directory)
-
-  #create dir of the file
-  import os
-  if not os.path.exists(dest_directory):
-    os.makedirs(dest_directory)
-            
-  return True
 
 def dividing_line():  # 5个文件。
     file_path_list = ['../label_change_jilu.txt', 
@@ -336,7 +322,8 @@ def show_result(x, changed_data, ckpt_path_final, ckpt_path_final_new, nb_succes
     print('number of x0 failed:', nb_fail)
     
     with open('../success_infor.txt','a+') as f:
-        f.write(nb_success)
+        f.write('\nsuccess_time:'+str(nb_success))
+        f.write('\nx new label:\n'+str(x_labels_after))
 
     return nb_success, nb_fail
 
@@ -594,48 +581,82 @@ def itr_grads(cgd_data, x, ckpt_path_final, itr, idx):
 
     # real label's gradients wrt x_a
     x_grads = deep_cnn.gradients(x, ckpt_path_final, idx, FLAGS.tgt_lb, new=False)[0]  
+    x_grads_cp = copy.deepcopy(x_grads)
     
     print('the lenth of changed data: %d' % len(cgd_data))
-    each_nb = 0
-    for each in cgd_data:   
-        print('\n---start change data of number: %d / %d---' % (each_nb, len(cgd_data)))
-        each_grads = deep_cnn.gradients(each, ckpt_path_final, idx, FLAGS.tgt_lb, new=False)[0]  
-
-        # in x_grads,set a pixel to 0 if its sign is different whith pexel in each_grads
-        # this could ensure elected pixels that affect y least for x_i but most for x_A
-        x_grads_cp = copy.deepcopy(x_grads)
-        print(x_grads[0][0])
-        x_grads_cp[(x_grads_cp * each_grads) <0] = 0 
-        print('---up is x_grads[0][0], next is each_grads[0][0]---')
-        print(each_grads[0][0])
-        print('--next is combined matrix---')
-
-        # show how may 0 in x_grads
-        x_grads_flatten = np.reshape(x_grads_cp, (-1, ))
-        ct = Counter(x_grads_flatten)
-        print('there are %d pixels not changed in image %d' % (ct[0], each_nb))
-
-        each_4d = np.expand_dims(each, axis=0)
-        each_pred_lb_b = np.argmax(deep_cnn.softmax_preds(each_4d, ckpt_path_final))
-        print('the predicted label of each before changing is :%d ' %each_pred_lb_b)
+    each_grad = 0
+    if each_grad == 1:
+        each_nb = 0
+        for each in cgd_data:   
+            print('\n---start change data of number: %d / %d---' % (each_nb, len(cgd_data)))
+            each_grads = deep_cnn.gradients(each, ckpt_path_final, idx, FLAGS.tgt_lb, new=False)[0]      
+            # in x_grads,set a pixel to 0 if its sign is different whith pexel in each_grads
+            # this could ensure elected pixels that affect y least for x_i but most for x_A
+            
+            print(x_grads[0][0])
+            x_grads_cp[(x_grads_cp * each_grads) <0] = 0 
+            print('---up is x_grads[0][0], next is each_grads[0][0]---')
+            print(each_grads[0][0])
+            print('--next is combined matrix---')
+    
+            # show how may 0 in x_grads
+            x_grads_flatten = np.reshape(x_grads_cp, (-1, ))
+            ct = Counter(x_grads_flatten)
+            print('there are %d pixels not changed in image %d' % (ct[0], each_nb))
+    
+            each_4d = np.expand_dims(each, axis=0)
+            each_pred_lb_b = np.argmax(deep_cnn.softmax_preds(each_4d, ckpt_path_final))
+            print('the predicted label of each before changing is :%d ' %each_pred_lb_b)
+            
+            if itr == 0:
+                img_dir_ori = FLAGS.image_dir +'/'+str(FLAGS.dataset)+'/changed_data/x_grads/number_'+str(idx)+'/'+str(itr)+'/'+str(each_nb)+'_ori.png'
+                deep_cnn.save_fig(each.astype(np.int32), img_dir_ori)
+            
+            
+            # iterate each changed data
+            each += (x_grads_cp * FLAGS.epsilon)
+            
+            each_4d = np.expand_dims(each, axis=0)
+            each_pred_lb_a = np.argmax(deep_cnn.softmax_preds(each_4d, ckpt_path_final))
+            print('the predicted label of each after changing is :%d ' %each_pred_lb_a)
+    
+            each = np.clip(each, 0, 255)
+            img_dir = FLAGS.image_dir +'/'+str(FLAGS.dataset)+'/changed_data/x_grads/number_'+str(idx)+'/'+str(itr)+'/'+str(each_nb)+'.png'
+            deep_cnn.save_fig(each.astype(np.int32), img_dir)
+            
+            each_nb += 1
+    else:
         
-        if itr == 0:
-            img_dir_ori = FLAGS.image_dir +'/'+str(FLAGS.dataset)+'/changed_data/x_grads/number_'+str(idx)+'/'+str(itr)+'/'+str(each_nb)+'_ori.png'
-            deep_cnn.save_fig(each.astype(np.int32), img_dir_ori)
+        batch_nbs = int(np.floor(len(cgd_data) / FLAGS.batch_size))
+        for batch_nb in range(batch_nbs):
+            print('\n---start change data of batch: %d / %d---' % (batch_nb, batch_nbs))
+            if batch_nb == (batch_nbs - 1):
+                batch = cgd_data[batch_nb * FLAGS.batch_size:]
+            else:
+                batch = cgd_data[batch_nb * FLAGS.batch_size :(batch_nb + 1) * FLAGS.batch_size]
+            
+            batch_grads = deep_cnn.gradients(batch, ckpt_path_final, idx, FLAGS.tgt_lb, new=False)[0]  # a batch of gradients
+            print('batch_grads.shape:', batch_grads.shape)
+            batch_grads_cp = copy.deepcopy(batch_grads)
+            x_grads_cp_batch = np.repeat(np.expand_dims(x_grads_cp, axis=0), len(batch), axis=0)
+            
+            for i in range(len(batch)):
+                x_grads_cp_batch[i][(x_grads_cp_batch[i] * batch_grads_cp[i]) <0] = 0
+                
+            # show how may 0 in x_grads
+            batch_grads_flatten = np.reshape(batch_grads_cp, (-1, ))
+            ct = Counter(batch_grads_flatten)
+            print('there are %d %% pixels not changed in batch %d' % ( np.around(ct[0]/len(batch_grads_flatten) * 100), batch_nb))
+            
+            batch_pred_lb_b = np.argmax(deep_cnn.softmax_preds(batch, ckpt_path_final), axis=1)
+            print('the predicted label of batch before changing is : ', batch_pred_lb_b[:20])
         
-        
-        # iterate each changed data
-        each += (x_grads_cp * FLAGS.epsilon)
-        
-        each_4d = np.expand_dims(each, axis=0)
-        each_pred_lb_a = np.argmax(deep_cnn.softmax_preds(each_4d, ckpt_path_final))
-        print('the predicted label of each after changing is :%d ' %each_pred_lb_a)
-
-        each = np.clip(each, 0, 255)
-        img_dir = FLAGS.image_dir +'/'+str(FLAGS.dataset)+'/changed_data/x_grads/number_'+str(idx)+'/'+str(itr)+'/'+str(each_nb)+'.png'
-        deep_cnn.save_fig(each.astype(np.int32), img_dir)
-        
-        each_nb += 1
+            # iterate each changed data
+            batch += (x_grads_cp_batch * FLAGS.epsilon)
+ 
+            batch_pred_lb_a = np.argmax(deep_cnn.softmax_preds(batch, ckpt_path_final), axis=1)
+            print('the predicted label of batch after changing is : ', batch_pred_lb_a[:20])
+            
     return True
 
 def save_neighbors(train_data, train_labels, x, x_label, ckpt_path_final, number, saved_nb):
@@ -681,7 +702,7 @@ def main(argv=None):  # pylint: disable=unused-argument
     dir_list = [FLAGS.data_dir,FLAGS.train_dir, FLAGS.image_dir,
                 FLAGS.record_dir,ckpt_dir]
     for i in dir_list:
-        assert create_dir_if_needed(i)
+        assert input_.create_dir_if_needed(i)
         
     # create log files and add dividing line 
     assert dividing_line()
@@ -703,7 +724,7 @@ def main(argv=None):  # pylint: disable=unused-argument
     
     # decide which index
     if FLAGS.selected_x:
-        index = [9882, 9894, 9905, 9906]
+        index = [9905, 9894, 9906]
     else:
         index = range(len(test_data))
         
