@@ -90,7 +90,9 @@ def save_fig(img, img_path):
         img = np.reshape(img, img.shape[1:4])
     if len(img.shape)==3 and img.shape[-1]==1: # (28, 28, 1) shift to (28, 28)
         img = np.reshape(img, img.shape[0:2]) 
-
+    if len(img.shape)==4 and img.shape[0] != 1:
+        print('a batch of figures, do not save for saving time.')
+        return True
     plt.figure()
     plt.imshow(img, cmap='jet')
     plt.axis('off')
@@ -520,7 +522,7 @@ def gradients(x_ori, ckpt_path_final, number, grad_label, return_logits = True, 
 
     
     (rows, cols, chns) = (28, 28, 1) if FLAGS.dataset=='mnist' else (32, 32, 3)
-    save_fig(x, '../image_save/'+str(FLAGS.dataset)+'_grads_number'+str(number)+'_original.png')
+    #save_fig(x, '../image_save/'+str(FLAGS.dataset)+'_grads_number'+str(number)+'_original.png')
 
 
     x_placeholder = tf.placeholder(tf.float32, shape=(None, rows, cols, chns))
@@ -545,7 +547,7 @@ def gradients(x_ori, ckpt_path_final, number, grad_label, return_logits = True, 
         print('model is restored at: ', ckpt_path_final,'\n')
 
         output_val = sess.run(output, feed_dict={x_placeholder:x})  # shape:(1, 10)
-        assert output_val.shape == (1, 10)  # ensure output.shape is right
+        #assert output_val.shape == (1, 10)  # ensure output.shape is right
         #print('output_probilities on this model:',output_val[0])
         print('output_predicted_labels on this model', np.argmax(output_val[0]))
         
@@ -556,10 +558,15 @@ def gradients(x_ori, ckpt_path_final, number, grad_label, return_logits = True, 
             grads = tf.gradients(output[0][t], x_placeholder)
 
             grads_value = sess.run(grads, feed_dict={x_placeholder:x})  # is a list: [list of (1, rows, cols, chns), dtype=float32]
-            #print(np.array(grads_value[0][0]).shape)
-            grads_mat = np.array(grads_value[0][0])  # shift from list to numpy, note grads_value[0].shape:(1, rows, cols, chns)
+            print('np.array(grads_value[0]).shape: ', np.array(grads_value[0]).shape)
+            if np.array(grads_value[0]).shape[0] == 1:
+                print('compute gradients of just one image')
+                grads_mat = np.array(grads_value[0][0])  # shift from list to numpy, note grads_value[0].shape:(1, rows, cols, chns)
+            else:
+                print('compute gradients of a batch of images')
+                grads_mat = np.array(grads_value[0])  # shift from list to numpy, note grads_value[0].shape:(1, rows, cols, chns)
 
-            assert grads_mat.shape==(rows, cols, chns)
+            #assert grads_mat.shape==(rows, cols, chns)
             
             #print('grads_mat_shape:',grads_mat.shape)
             grads_mat_min = np.min(grads_mat)
@@ -604,11 +611,11 @@ def gradients(x_ori, ckpt_path_final, number, grad_label, return_logits = True, 
 #                 grads_plus_txt = '../image_save/'+str(FLAGS.dataset)+'_grads_number'+str(number)+'_class_'+str(t)+'_plus.txt'
 #                 grads_minus_txt = '../image_save/'+str(FLAGS.dataset)+'_grads_number'+str(number)+'_class_'+str(t)+'_minus.txt'
 # =============================================================================
-
-            save_fig(grads_mat_plus, grads_plus_path)
-            save_fig(grads_mat_minus, grads_minus_path)
-            save_fig(grads_mat_show, grads_path)
-            savi_hotfig(grads_mat, grads_hot_path)
+            if grads_mat.shape==(rows, cols, chns):
+                save_fig(grads_mat_plus, grads_plus_path)
+                save_fig(grads_mat_minus, grads_minus_path)
+                save_fig(grads_mat_show, grads_path)
+                savi_hotfig(grads_mat, grads_hot_path)
             
 # =============================================================================
 #             np.savetxt(grads_plus_txt, np.reshape(grads_mat_plus, (28, 28)), fmt='%.1f')
