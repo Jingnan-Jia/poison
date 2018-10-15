@@ -18,9 +18,7 @@ import cv2
 import deep_cnn
 import input_
 import metrics
-import utils
 from PIL import Image
-
 from keras.datasets import cifar10, mnist
 import argparse
 import math
@@ -581,22 +579,24 @@ def itr_grads(cgd_data, x, ckpt_path_final, itr, idx):
 
     # real label's gradients wrt x_a
     x_grads = deep_cnn.gradients(x, ckpt_path_final, idx, FLAGS.tgt_lb, new=False)[0]  
-    x_grads_cp = copy.deepcopy(x_grads)
+
     
     print('the lenth of changed data: %d' % len(cgd_data))
-    each_grad = 0
-    if each_grad == 1:
+    do_each_grad = 0
+    if do_each_grad == 1:
         each_nb = 0
         for each in cgd_data:   
+            x_grads_cp = copy.deepcopy(x_grads)  #  every time x_grads_cp is a still x_grads
             print('\n---start change data of number: %d / %d---' % (each_nb, len(cgd_data)))
-            each_grads = deep_cnn.gradients(each, ckpt_path_final, idx, FLAGS.tgt_lb, new=False)[0]      
+            each_grads = deep_cnn.gradients(each, ckpt_path_final, idx, FLAGS.tgt_lb, new=False)[0]  
+            each_grads_cp = copy.deepcopy(each_grads)
             # in x_grads,set a pixel to 0 if its sign is different whith pexel in each_grads
             # this could ensure elected pixels that affect y least for x_i but most for x_A
             
-            print(x_grads[0][0])
-            x_grads_cp[(x_grads_cp * each_grads) <0] = 0 
+            print(x_grads_cp[0][0])
+            x_grads_cp[(x_grads_cp * each_grads_cp) <0] = 0 
             print('---up is x_grads[0][0], next is each_grads[0][0]---')
-            print(each_grads[0][0])
+            print(each_grads_cp[0][0])
             print('--next is combined matrix---')
     
             # show how may 0 in x_grads
@@ -620,8 +620,8 @@ def itr_grads(cgd_data, x, ckpt_path_final, itr, idx):
             each_pred_lb_a = np.argmax(deep_cnn.softmax_preds(each_4d, ckpt_path_final))
             print('the predicted label of each after changing is :%d ' %each_pred_lb_a)
     
-            each = np.clip(each, 0, 255)
-            img_dir = FLAGS.image_dir +'/'+str(FLAGS.dataset)+'/changed_data/x_grads/number_'+str(idx)+'/'+str(itr)+'/'+str(each_nb)+'.png'
+            each = np.clip(each, 0, 255)  
+            img_dir = FLAGS.image_dir +'/'+str(FLAGS.dataset)+'/changed_data/x_grads/number_'+str(idx)++'/'+'img_'+str(each_nb)+'/iteration_'+str(itr)+'.png'
             deep_cnn.save_fig(each.astype(np.int32), img_dir)
             
             each_nb += 1
@@ -629,6 +629,8 @@ def itr_grads(cgd_data, x, ckpt_path_final, itr, idx):
         
         batch_nbs = int(np.floor(len(cgd_data) / FLAGS.batch_size))
         for batch_nb in range(batch_nbs):
+            x_grads_cp = copy.deepcopy(x_grads)  #  every time x_grads_cp is a still x_grads, mustnot change this line's position!
+
             print('\n---start change data of batch: %d / %d---' % (batch_nb, batch_nbs))
             if batch_nb == (batch_nbs - 1):
                 batch = cgd_data[batch_nb * FLAGS.batch_size:]
@@ -636,27 +638,51 @@ def itr_grads(cgd_data, x, ckpt_path_final, itr, idx):
                 batch = cgd_data[batch_nb * FLAGS.batch_size :(batch_nb + 1) * FLAGS.batch_size]
             
             batch_grads = deep_cnn.gradients(batch, ckpt_path_final, idx, FLAGS.tgt_lb, new=False)[0]  # a batch of gradients
-            print('batch_grads.shape:', batch_grads.shape)
+            
             batch_grads_cp = copy.deepcopy(batch_grads)
             x_grads_cp_batch = np.repeat(np.expand_dims(x_grads_cp, axis=0), len(batch), axis=0)
             
             for i in range(len(batch)):
+                #deep_cnn.save_hotfig(x_grads_cp_batch[i], '../x_grads_cp_batch_old/'+str(i)+'.png')  # save and normal
+                #deep_cnn.save_hotfig(batch_grads_cp[i], '../batch_grads_cp_old/'+str(i)+'.png')  #all 0 !! except first img
+
                 x_grads_cp_batch[i][(x_grads_cp_batch[i] * batch_grads_cp[i]) <0] = 0
                 
+                #deep_cnn.save_hotfig(batch_grads_cp[i], '../batch_grads_cp/'+str(i)+'.png')  #all 0 !! except first img
+                #deep_cnn.save_hotfig(x_grads_cp_batch[i], '../x_grads_cp_batch/'+str(i)+'.png')
+
+                #print(x_grads_cp_batch[i])
+                
             # show how may 0 in x_grads
-            batch_grads_flatten = np.reshape(batch_grads_cp, (-1, ))
+            batch_grads_flatten = np.reshape(x_grads_cp_batch, (-1, ))
+            #print('batch_grads_flatten:',batch_grads_flatten[:100])
             ct = Counter(batch_grads_flatten)
             print('there are %d %% pixels not changed in batch %d' % ( np.around(ct[0]/len(batch_grads_flatten) * 100), batch_nb))
             
             batch_pred_lb_b = np.argmax(deep_cnn.softmax_preds(batch, ckpt_path_final), axis=1)
             print('the predicted label of batch before changing is : ', batch_pred_lb_b[:20])
-        
+            
+            # save the original 5 figures
+            if batch_nb == 0 and itr == 0:
+                for i in range(5):
+                    img_dir = FLAGS.image_dir +'/'+str(FLAGS.dataset)+'/changed_data/x_grads/number_'+str(idx)+'/'+'img_'+str(i)+'/iteration_'+str(itr)+'_ori.png'
+                    deep_cnn.save_fig(batch[i].astype(np.int32), img_dir)
+                    
             # iterate each changed data
             batch += (x_grads_cp_batch * FLAGS.epsilon)
- 
+
             batch_pred_lb_a = np.argmax(deep_cnn.softmax_preds(batch, ckpt_path_final), axis=1)
             print('the predicted label of batch after changing is : ', batch_pred_lb_a[:20])
             
+            batch = np.clip(batch, 0, 255)
+            
+            # save the changed 5 figures after one iteration
+            if batch_nb == 0:
+                for i in range(5):
+                    img_dir = FLAGS.image_dir +'/'+str(FLAGS.dataset)+'/changed_data/x_grads/number_'+str(idx)+'/'+'img_'+str(i)+'/iteration_'+str(itr)+'.png'
+                    deep_cnn.save_fig(batch[i].astype(np.int32), img_dir)
+            
+            batch_nb += 1
     return True
 
 def save_neighbors(train_data, train_labels, x, x_label, ckpt_path_final, number, saved_nb):
@@ -729,6 +755,7 @@ def main(argv=None):  # pylint: disable=unused-argument
         index = range(len(test_data))
         
     for idx in index:
+        time.asctime( time.localtime(time.time()))
         print('================current num: %d ================'% idx)
         x = copy.deepcopy(test_data[idx])
         
@@ -860,7 +887,7 @@ def main(argv=None):  # pylint: disable=unused-argument
             
         #save 10 watermark images
         for i in range(10):  # shift to int for save fig
-            deep_cnn.save_fig(changed_data[i].astype(np.int),
+            deep_cnn.save_fig(cgd_data[i].astype(np.int),
                               (FLAGS.image_dir + '/'+
                                str(FLAGS.dataset)+'/'+
                               'changed_data/'+
@@ -885,7 +912,7 @@ def main(argv=None):  # pylint: disable=unused-argument
         train_tuple = start_train(train_data_new, train_labels, test_data, test_labels, 
                                   new_ckpt_path, new_ckpt_path_final)  
         
-        nb_success, nb_fail = show_result(x, changed_data, ckpt_path_final, 
+        nb_success, nb_fail = show_result(x, cgd_data, ckpt_path_final, 
                                           new_ckpt_path_final, nb_success, 
                                           nb_fail, FLAGS.tgt_lb)
         
