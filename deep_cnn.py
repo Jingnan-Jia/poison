@@ -51,7 +51,7 @@ LEARNING_RATE_DECAY_FACTOR = 0.1  # Learning rate decay factor.
 MEAN = 120.707
 STD = 64.15
         
-def savi_hotfig(img, img_path):
+def save_hotfig(img, img_path):
     '''save hotfig using plt.
     Args:
         img: a 3D image 
@@ -59,6 +59,8 @@ def savi_hotfig(img, img_path):
     Returns:
         True if all right.
     '''
+    os.makedirs(os.path.dirname(img_path), exist_ok=True)
+
     if len(img.shape)==3:
         if img.shape[-1] == 1: # (28, 28, 1) shift to (28, 28)
             img = np.reshape(img, img.shape[0:2]) 
@@ -72,7 +74,8 @@ def savi_hotfig(img, img_path):
     plt.savefig(img_path, bbox_inches = 'tight')
     #cv2.imwrite(img_path, img)
     plt.close()
-    
+    print('hotfigure is saved at', img_path)
+
     return True
 
 
@@ -99,6 +102,7 @@ def save_fig(img, img_path):
     plt.savefig(img_path, bbox_inches = 'tight')
     #cv2.imwrite(img_path, img)
     plt.close()
+    print('image is saved at', img_path)
     #print('image saved at'+img_path) 
     
     return True
@@ -477,6 +481,7 @@ def train(images_ori, labels, ckpt_path, dropout=False):
             if (step + 1) == FLAGS.max_steps:
                 saver.save(sess, ckpt_path, global_step=step)
                 print('model is saved at: ', ckpt_path+'-'+str(step),'\n')
+                time.asctime( time.localtime(time.time()))
 
     # Reset graph 
     tf.reset_default_graph()
@@ -547,17 +552,20 @@ def gradients(x_ori, ckpt_path_final, number, grad_label, return_logits = True, 
         print('model is restored at: ', ckpt_path_final,'\n')
 
         output_val = sess.run(output, feed_dict={x_placeholder:x})  # shape:(1, 10)
+        print('output_val.shape:',output_val.shape)
         #assert output_val.shape == (1, 10)  # ensure output.shape is right
         #print('output_probilities on this model:',output_val[0])
-        print('output_predicted_labels on this model', np.argmax(output_val[0]))
+        print('output_predicted_labels on this model', np.argmax(output_val, axis=1))
+
         
         minus = []
         plus = []
         #for t in range(FLAGS.nb_labels):  # if want save 10 gradients use this line
         for t in [grad_label]:  # if want only 1 gradient use this line
-            grads = tf.gradients(output[0][t], x_placeholder)
+            grads = tf.gradients(output[:,t], x_placeholder)
 
             grads_value = sess.run(grads, feed_dict={x_placeholder:x})  # is a list: [list of (1, rows, cols, chns), dtype=float32]
+            #print('grads_value:\n',grads_value)
             print('np.array(grads_value[0]).shape: ', np.array(grads_value[0]).shape)
             if np.array(grads_value[0]).shape[0] == 1:
                 print('compute gradients of just one image')
@@ -565,6 +573,7 @@ def gradients(x_ori, ckpt_path_final, number, grad_label, return_logits = True, 
             else:
                 print('compute gradients of a batch of images')
                 grads_mat = np.array(grads_value[0])  # shift from list to numpy, note grads_value[0].shape:(1, rows, cols, chns)
+                #print('grads_mat[1]',grads_mat[1])
 
             #assert grads_mat.shape==(rows, cols, chns)
             
@@ -611,12 +620,15 @@ def gradients(x_ori, ckpt_path_final, number, grad_label, return_logits = True, 
 #                 grads_plus_txt = '../image_save/'+str(FLAGS.dataset)+'_grads_number'+str(number)+'_class_'+str(t)+'_plus.txt'
 #                 grads_minus_txt = '../image_save/'+str(FLAGS.dataset)+'_grads_number'+str(number)+'_class_'+str(t)+'_minus.txt'
 # =============================================================================
-            if grads_mat.shape==(rows, cols, chns):
+            if grads_mat.shape[0]==1:
                 save_fig(grads_mat_plus, grads_plus_path)
                 save_fig(grads_mat_minus, grads_minus_path)
                 save_fig(grads_mat_show, grads_path)
-                savi_hotfig(grads_mat, grads_hot_path)
-            
+                save_hotfig(grads_mat, grads_hot_path)
+                
+                print('the target label is: ', grad_label)
+                print('grads_mat_plus saved at ' + grads_plus_path)
+                print('grads_mat saved at ' + grads_path)
 # =============================================================================
 #             np.savetxt(grads_plus_txt, np.reshape(grads_mat_plus, (28, 28)), fmt='%.1f')
 #             np.savetxt(grads_minus_txt, np.reshape(grads_mat_minus, (28, 28)), fmt='%.1f')
@@ -626,9 +638,7 @@ def gradients(x_ori, ckpt_path_final, number, grad_label, return_logits = True, 
             
             if t == grad_label:
                 grads_mat_, grads_mat_plus_, grads_mat_show_ = grads_mat, grads_mat_plus, grads_mat_show
-        print('the target label is: ', grad_label)
-        print('grads_mat_plus saved at ' + grads_plus_path)
-        print('grads_mat saved at ' + grads_path)
+
         
         #print('minus:', minus)
         #print('plus:', plus)
